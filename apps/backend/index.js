@@ -14,10 +14,7 @@ app.use(express.json());
 app.use(cors());
 
 mongoose
-  .connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
+  .connect(process.env.MONGODB_URI)
   .then(() => {
     logger.info("Connected to MongoDB");
   })
@@ -31,39 +28,6 @@ const updateCheckLimiter = rateLimit({
   max: 100, // limit each IP to 100 requests per windowMs
   message: { error: "Too many update check requests" },
 });
-
-// In-memory storage (use database in production)
-let appVersions = {
-  myapp: {
-    currentVersion: "1.0.0",
-    latestVersion: "1.2.0",
-    releaseDate: "2024-12-01T10:00:00Z",
-    downloadUrl: "https://releases.myapp.com/v1.2.0",
-    releaseNotes: [
-      "Added dark mode support",
-      "Fixed memory leak in background sync",
-      "Improved performance by 30%",
-      "Security updates",
-    ],
-    critical: false,
-    minimumVersion: "1.0.0",
-    changelog: "https://myapp.com/changelog/v1.2.0",
-  },
-  "myapp-beta": {
-    currentVersion: "1.2.0",
-    latestVersion: "1.3.0-beta.1",
-    releaseDate: "2024-12-15T14:30:00Z",
-    downloadUrl: "https://releases.myapp.com/beta/v1.3.0-beta.1",
-    releaseNotes: [
-      "New experimental AI features",
-      "Redesigned user interface",
-      "Performance improvements",
-    ],
-    critical: false,
-    minimumVersion: "1.2.0",
-    changelog: "https://myapp.com/changelog/v1.3.0-beta.1",
-  },
-};
 
 // Update check statistics
 let updateStats = {
@@ -137,7 +101,7 @@ app.get("/api/updates/check", updateCheckLimiter, async (req, res) => {
   if (!appInfo) {
     return res.status(404).json({
       error: "Application not found",
-      availableApps: Object.keys(appVersions),
+      availableApps: Object.keys(await AppVersion.find()),
     });
   }
 
@@ -227,10 +191,6 @@ app.post("/api/admin/publish", express.json(), async (req, res) => {
     return res.status(400).json({ error: "Version is required" });
   }
 
-  if (!appVersions[app]) {
-    appVersions[app] = {};
-  }
-
   let appInfo = await AppVersion.findOne({ app });
 
   if (!appInfo) {
@@ -251,13 +211,13 @@ app.post("/api/admin/publish", express.json(), async (req, res) => {
   res.json({
     success: true,
     message: `Version ${version} published for ${app}`,
-    publishedAt: appVersions[app].releaseDate,
-    previousVersion: oldVersion,
+    publishedAt: appInfo.releaseDate,
+    previousVersion: version,
   });
 });
 
 // Get update statistics
-app.get("/api/admin/stats", (req, res) => {
+app.get("/api/admin/stats", async (req, res) => {
   const adminKey = req.headers["x-admin-key"];
   if (adminKey !== process.env.ADMIN_KEY) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -274,7 +234,7 @@ app.get("/api/admin/stats", (req, res) => {
     checksToday: updateStats.checksToday,
     lastReset: updateStats.lastReset,
     versionDistribution,
-    availableApps: Object.keys(appVersions),
+    availableApps: Object.keys(await AppVersion.find()),
     uptime: process.uptime(),
   });
 });
@@ -315,28 +275,24 @@ app.post("/api/webhook/release", express.json(), async (req, res) => {
   }
 
   const appName = repository?.name || "myapp";
-let appInfo = await AppVersion.findOne({ app: appName });
+  let appInfo = await AppVersion.findOne({ app: appName });
 
-if (!appInfo) {
-  appInfo = new AppVersion({ app: appName });
-}
-
-appInfo.latestVersion = version;
-appInfo.releaseDate = new Date();
-appInfo.downloadUrl = download_url;
-appInfo.releaseNotes = release_notes || [`Release ${version}`];
-
-await appInfo.save();
-
-res.json({
-  success: true,
-  message: `Version ${version} updated via webhook`,
-  app: appName,
-});
-
-  } else {
-    res.status(404).json({ error: "App not found" });
+  if (!appInfo) {
+    appInfo = new AppVersion({ app: appName });
   }
+
+  appInfo.latestVersion = version;
+  appInfo.releaseDate = new Date();
+  appInfo.downloadUrl = download_url;
+  appInfo.releaseNotes = release_notes || [`Release ${version}`];
+
+  await appInfo.save();
+
+  res.json({
+    success: true,
+    message: `Version ${version} updated via webhook`,
+    app: appName,
+  });
 });
 
 // Error handling middleware
@@ -366,7 +322,9 @@ app.use((req, res) => {
   });
 });
 
-app.listen(port, () => {
+app.listen(port, async () => {
   logger.info(`Update server started on http://localhost:${port}`);
-  logger.info(`Available apps: ${Object.keys(appVersions).join(", ")}`);
+  logger.info(
+    `Available apps: ${Object.keys(await AppVersion.find()).join(", ")}`
+  );
 });
