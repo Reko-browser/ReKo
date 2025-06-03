@@ -3,6 +3,8 @@ import "dotenv/config";
 import { logger } from "./config/logger.js";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import { AppVersion } from "./models/AppVersion.js";
+import mongoose from "mongoose";
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -10,6 +12,18 @@ const port = process.env.PORT || 3000;
 // Middleware
 app.use(express.json());
 app.use(cors());
+
+mongoose
+  .connect(process.env.MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => {
+    logger.info("Connected to MongoDB");
+  })
+  .catch((err) => {
+    logger.error("MongoDB connection error:", err);
+  });
 
 // Rate limiting for update checks
 const updateCheckLimiter = rateLimit({
@@ -95,7 +109,7 @@ app.head("/", (req, res) => {
 });
 
 // Check for updates endpoint
-app.get("/api/updates/check", updateCheckLimiter, (req, res) => {
+app.get("/api/updates/check", updateCheckLimiter, async (req, res) => {
   resetDailyStats();
 
   const {
@@ -118,7 +132,8 @@ app.get("/api/updates/check", updateCheckLimiter, (req, res) => {
     `Update check: app=${appName}, version=${currentVersion}, platform=${platform}, ip=${req.ip}`
   );
 
-  const appInfo = appVersions[appName];
+  const appInfo = await AppVersion.findOne({ app: appName });
+
   if (!appInfo) {
     return res.status(404).json({
       error: "Application not found",
@@ -164,30 +179,35 @@ app.get("/api/updates/check", updateCheckLimiter, (req, res) => {
 });
 
 // Get version info endpoint
-app.get("/api/version/:app", (req, res) => {
-  const appName = req.params.app || "myapp";
-  const appInfo = appVersions[appName];
+app.get("/api/version/:app", async (req, res) => {
+  const appName = req.params.app;
 
-  if (!appInfo) {
-    return res.status(404).json({
-      error: "Application not found",
-      availableApps: Object.keys(appVersions),
+  try {
+    const appInfo = await AppVersion.findOne({ app: appName });
+    if (!appInfo) {
+      const apps = await AppVersion.find({}, "app");
+      return res.status(404).json({
+        error: "Application not found",
+        availableApps: apps.map((a) => a.app),
+      });
+    }
+
+    res.json({
+      app: appName,
+      version: appInfo.latestVersion,
+      releaseDate: appInfo.releaseDate,
+      downloadUrl: appInfo.downloadUrl,
+      releaseNotes: appInfo.releaseNotes,
+      minimumVersion: appInfo.minimumVersion,
+      critical: appInfo.critical,
     });
+  } catch (err) {
+    res.status(500).json({ error: "Server error", details: err.message });
   }
-
-  res.json({
-    app: appName,
-    version: appInfo.latestVersion,
-    releaseDate: appInfo.releaseDate,
-    downloadUrl: appInfo.downloadUrl,
-    releaseNotes: appInfo.releaseNotes,
-    minimumVersion: appInfo.minimumVersion,
-    critical: appInfo.critical,
-  });
 });
 
 // Admin endpoint to publish new version
-app.post("/api/admin/publish", express.json(), (req, res) => {
+app.post("/api/admin/publish", express.json(), async (req, res) => {
   const {
     app = "myapp",
     version,
@@ -211,18 +231,20 @@ app.post("/api/admin/publish", express.json(), (req, res) => {
     appVersions[app] = {};
   }
 
-  const oldVersion = appVersions[app].latestVersion;
+  let appInfo = await AppVersion.findOne({ app });
 
-  appVersions[app] = {
-    ...appVersions[app],
-    latestVersion: version,
-    releaseDate: new Date().toISOString(),
-    downloadUrl: downloadUrl || appVersions[app].downloadUrl,
-    releaseNotes: releaseNotes || [`Updated to version ${version}`],
-    critical: critical,
-    minimumVersion:
-      minimumVersion || appVersions[app].minimumVersion || version,
-  };
+  if (!appInfo) {
+    appInfo = new AppVersion({ app });
+  }
+
+  appInfo.latestVersion = version;
+  appInfo.releaseDate = new Date();
+  appInfo.downloadUrl = downloadUrl || appInfo.downloadUrl;
+  appInfo.releaseNotes = releaseNotes || [`Updated to version ${version}`];
+  appInfo.critical = critical;
+  appInfo.minimumVersion = minimumVersion || appInfo.minimumVersion || version;
+
+  await appInfo.save();
 
   logger.info(`New version published for ${app}: ${oldVersion} -> ${version}`);
 
@@ -268,19 +290,22 @@ app.get("/health", (req, res) => {
 });
 
 // List all available apps
-app.get("/api/apps", (req, res) => {
-  const apps = Object.keys(appVersions).map((appName) => ({
-    name: appName,
-    latestVersion: appVersions[appName].latestVersion,
-    releaseDate: appVersions[appName].releaseDate,
-    critical: appVersions[appName].critical,
-  }));
-
-  res.json({ apps });
+app.get("/api/apps", async (req, res) => {
+  try {
+    const apps = await AppVersion.find(
+      {},
+      "app latestVersion releaseDate critical"
+    );
+    res.json({ apps });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ error: "Failed to fetch apps", details: err.message });
+  }
 });
 
 // Webhook endpoint for CI/CD integration
-app.post("/api/webhook/release", express.json(), (req, res) => {
+app.post("/api/webhook/release", express.json(), async (req, res) => {
   const { repository, version, download_url, release_notes } = req.body;
 
   // Simple webhook validation (use proper signature validation in production)
@@ -290,20 +315,25 @@ app.post("/api/webhook/release", express.json(), (req, res) => {
   }
 
   const appName = repository?.name || "myapp";
+let appInfo = await AppVersion.findOne({ app: appName });
 
-  if (appVersions[appName]) {
-    appVersions[appName].latestVersion = version;
-    appVersions[appName].releaseDate = new Date().toISOString();
-    appVersions[appName].downloadUrl = download_url;
-    appVersions[appName].releaseNotes = release_notes || [`Release ${version}`];
+if (!appInfo) {
+  appInfo = new AppVersion({ app: appName });
+}
 
-    logger.info(`Webhook release update: ${appName} -> ${version}`);
+appInfo.latestVersion = version;
+appInfo.releaseDate = new Date();
+appInfo.downloadUrl = download_url;
+appInfo.releaseNotes = release_notes || [`Release ${version}`];
 
-    res.json({
-      success: true,
-      message: `Version ${version} updated via webhook`,
-      app: appName,
-    });
+await appInfo.save();
+
+res.json({
+  success: true,
+  message: `Version ${version} updated via webhook`,
+  app: appName,
+});
+
   } else {
     res.status(404).json({ error: "App not found" });
   }
