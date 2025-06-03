@@ -334,11 +334,6 @@ res.json({
   app: appName,
 });
 
-  } else {
-    res.status(404).json({ error: "App not found" });
-  }
-});
-
 // Error handling middleware
 app.use((err, req, res, next) => {
   logger.error("Server error:", err);
