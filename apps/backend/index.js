@@ -315,23 +315,24 @@ app.post("/api/webhook/release", express.json(), async (req, res) => {
   }
 
   const appName = repository?.name || "myapp";
-let appInfo = await AppVersion.findOne({ app: appName });
+  let appInfo = await AppVersion.findOne({ app: appName });
 
-if (!appInfo) {
-  appInfo = new AppVersion({ app: appName });
-}
+  if (!appInfo) {
+    appInfo = new AppVersion({ app: appName });
+  }
 
-appInfo.latestVersion = version;
-appInfo.releaseDate = new Date();
-appInfo.downloadUrl = download_url;
-appInfo.releaseNotes = release_notes || [`Release ${version}`];
+  appInfo.latestVersion = version;
+  appInfo.releaseDate = new Date();
+  appInfo.downloadUrl = download_url;
+  appInfo.releaseNotes = release_notes || [`Release ${version}`];
 
-await appInfo.save();
+  await appInfo.save();
 
-res.json({
-  success: true,
-  message: `Version ${version} updated via webhook`,
-  app: appName,
+  res.json({
+    success: true,
+    message: `Version ${version} updated via webhook`,
+    app: appName,
+  });
 });
 
 // Error handling middleware
