@@ -157,7 +157,7 @@ app.get("/api/updates/check", updateCheckLimiter, (req, res) => {
 });
 
 // Get version info endpoint
-app.get("/api/version/:app?", (req, res) => {
+app.get("/api/version/:app", (req, res) => {
   const appName = req.params.app || "myapp";
   const appInfo = appVersions[appName];
 
