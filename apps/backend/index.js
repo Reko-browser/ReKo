@@ -87,6 +87,13 @@ function compareVersions(version1, version2) {
   return 0;
 }
 
+app.head("/", (req, res) => {
+  res.status(200).json({
+    statusCode: 200,
+    message: "Im Up",
+  });
+});
+
 // Check for updates endpoint
 app.get("/api/updates/check", updateCheckLimiter, (req, res) => {
   resetDailyStats();
