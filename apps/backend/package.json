@@ -4,9 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "deploy": "wrangler deploy",
-    "deploy:wip": "wrangler deploy --env wip",
-    "dev": "wrangler dev"
+    "start": "node .",
+    "dev": "nodemon ."
   },
   "keywords": [],
   "author": "",
