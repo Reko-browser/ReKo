@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GitHub Release Trigger</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+      }
+
+      .card {
+        background: white;
+        border-radius: 12px;
+        padding: 30px;
+        margin-bottom: 20px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+      }
+
+      h1 {
+        color: #333;
+        margin-bottom: 30px;
+        text-align: center;
+        font-size: 28px;
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #333;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #e1e5e9;
+        border-radius: 8px;
+        font-size: 16px;
+        transition: border-color 0.3s ease;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      textarea {
+        height: 100px;
+        resize: vertical;
+      }
+
+      .file-upload {
+        border: 2px dashed #667eea;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+
+      .file-upload:hover {
+        border-color: #764ba2;
+        background: #f8f9ff;
+      }
+
+      .file-upload.dragover {
+        border-color: #764ba2;
+        background: #f0f4ff;
+        transform: scale(1.02);
+      }
+
+      .file-input {
+        display: none;
+      }
+
+      .file-list {
+        margin-top: 15px;
+        padding: 0;
+        list-style: none;
+      }
+
+      .file-item {
+        background: #f8f9fa;
+        padding: 10px 15px;
+        margin: 5px 0;
+        border-radius: 6px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .file-name {
+        font-weight: 500;
+      }
+
+      .file-size {
+        color: #666;
+        font-size: 14px;
+      }
+
+      .btn {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 15px 30px;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        width: 100%;
+      }
+
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+      }
+
+      .btn:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+
+      .btn-secondary {
+        background: #6c757d;
+        margin-top: 10px;
+      }
+
+      .btn-secondary:hover {
+        background: #5a6268;
+      }
+
+      .result {
+        margin-top: 20px;
+        padding: 20px;
+        border-radius: 8px;
+        display: none;
+      }
+
+      .result.success {
+        background: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+      }
+
+      .result.error {
+        background: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+      }
+
+      .releases-list {
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      .release-item {
+        border: 1px solid #e1e5e9;
+        border-radius: 8px;
+        padding: 15px;
+        margin: 10px 0;
+      }
+
+      .release-version {
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 5px;
+      }
+
+      .release-date {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 10px;
+      }
+
+      .release-stats {
+        display: flex;
+        gap: 20px;
+        font-size: 14px;
+        color: #666;
+      }
+
+      .release-link {
+        color: #667eea;
+        text-decoration: none;
+        font-weight: 500;
+      }
+
+      .release-link:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h1>🚀 GitHub Release Trigger</h1>
+
+        <form id="releaseForm">
+          <div class="form-group">
+            <label for="version">Version *</label>
+            <input
+              type="text"
+              id="version"
+              name="version"
+              placeholder="v1.0.0"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="platform">Platform</label>
+            <select id="platform" name="platform">
+              <option value="universal">Universal</option>
+              <option value="windows">Windows</option>
+              <option value="macos">macOS</option>
+              <option value="linux">Linux</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="releaseNotes">Release Notes</label>
+            <textarea
+              id="releaseNotes"
+              name="release_notes"
+              placeholder="Describe what's new in this release..."
+            ></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="filesUrl">Files URL (optional)</label>
+            <input
+              type="url"
+              id="filesUrl"
+              name="files_url"
+              placeholder="https://example.com/files.zip"
+            />
+            <small style="color: #666; display: block; margin-top: 5px">
+              URL to download files from, or upload files below
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label>Upload Files (optional)</label>
+            <div class="file-upload" id="fileUpload">
+              <div>📁 Click here or drag files to upload</div>
+              <div style="color: #999; font-size: 14px; margin-top: 5px">
+                Max 100MB per file
+              </div>
+            </div>
+            <input type="file" id="fileInput" class="file-input" multiple />
+            <ul class="file-list" id="fileList"></ul>
+          </div>
+
+          <div class="form-group">
+            <label for="callbackUrl">Callback URL (optional)</label>
+            <input
+              type="url"
+              id="callbackUrl"
+              name="callback_url"
+              placeholder="https://your-app.com/webhook/release-complete"
+            />
+            <small style="color: #666; display: block; margin-top: 5px">
+              URL to notify when release is complete
+            </small>
+          </div>
+
+          <button type="submit" class="btn" id="submitBtn">
+            🚀 Trigger Release
+          </button>
+        </form>
+
+        <div class="result" id="result"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-bottom: 20px">📦 Recent Releases</h2>
+        <button class="btn btn-secondary" onclick="loadReleases()">
+          Refresh Releases
+        </button>
+        <div class="releases-list" id="releasesList">
+          <p style="text-align: center; color: #666; padding: 20px">
+            Click "Refresh Releases" to load recent releases
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const form = document.getElementById("releaseForm");
+      const fileUpload = document.getElementById("fileUpload");
+      const fileInput = document.getElementById("fileInput");
+      const fileList = document.getElementById("fileList");
+      const result = document.getElementById("result");
+      const submitBtn = document.getElementById("submitBtn");
+      const releasesList = document.getElementById("releasesList");
+
+      let selectedFiles = [];
+
+      // File upload handlers
+      fileUpload.addEventListener("click", () => fileInput.click());
+      fileInput.addEventListener("change", handleFileSelect);
+
+      fileUpload.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        fileUpload.classList.add("dragover");
+      });
+
+      fileUpload.addEventListener("dragleave", () => {
+        fileUpload.classList.remove("dragover");
+      });
+
+      fileUpload.addEventListener("drop", (e) => {
+        e.preventDefault();
+        fileUpload.classList.remove("dragover");
+        const files = Array.from(e.dataTransfer.files);
+        addFiles(files);
+      });
+
+      function handleFileSelect(e) {
+        const files = Array.from(e.target.files);
+        addFiles(files);
+      }
+
+      function addFiles(files) {
+        selectedFiles = [...selectedFiles, ...files];
+        updateFileList();
+      }
+
+      function updateFileList() {
+        fileList.innerHTML = "";
+        selectedFiles.forEach((file, index) => {
+          const li = document.createElement("li");
+          li.className = "file-item";
+          li.innerHTML = `
+                    <div>
+                        <div class="file-name">${file.name}</div>
+                        <div class="file-size">${formatFileSize(
+                          file.size
+                        )}</div>
+                    </div>
+                    <button type="button" onclick="removeFile(${index})" style="background: #dc3545; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer;">
+                        Remove
+                    </button>
+                `;
+          fileList.appendChild(li);
+        });
+      }
+
+      function removeFile(index) {
+        selectedFiles.splice(index, 1);
+        updateFileList();
+      }
+
+      function formatFileSize(bytes) {
+        if (bytes === 0) return "0 Bytes";
+        const k = 1024;
+        const sizes = ["Bytes", "KB", "MB", "GB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+      }
+
+      // Form submission
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const formData = new FormData();
+
+        // Add form fields
+        formData.append("version", document.getElementById("version").value);
+        formData.append("platform", document.getElementById("platform").value);
+        formData.append(
+          "release_notes",
+          document.getElementById("releaseNotes").value
+        );
+        formData.append("files_url", document.getElementById("filesUrl").value);
+        formData.append(
+          "callback_url",
+          document.getElementById("callbackUrl").value
+        );
+
+        // Add files
+        selectedFiles.forEach((file) => {
+          formData.append("files", file);
+        });
+
+        // Update UI
+        submitBtn.disabled = true;
+        submitBtn.textContent = "🚀 Triggering Release...";
+        showResult("", ""); // Hide previous results
+
+        try {
+          const response = await fetch("/trigger-release", {
+            method: "POST",
+            body: formData,
+          });
+
+          const data = await response.json();
+
+          if (data.success) {
+            showResult(
+              "success",
+              `
+                        <strong>✅ Release triggered successfully!</strong><br>
+                        <strong>Version:</strong> ${data.version}<br>
+                        <strong>Trigger ID:</strong> ${data.trigger_id}<br>
+                        <br>
+                        The GitHub Actions workflow is now running. 
+                        You can check the progress in your repository's Actions tab.
+                        <br><br>
+                        <a href="https://github.com/${getRepoPath()}/actions" target="_blank" class="release-link">
+                            View Workflow Status →
+                        </a>
+                    `
+            );
+
+            // Clear form
+            form.reset();
+            selectedFiles = [];
+            updateFileList();
+          } else {
+            showResult(
+              "error",
+              `❌ Failed to trigger release: ${data.details || data.error}`
+            );
+          }
+        } catch (error) {
+          showResult("error", `❌ Request failed: ${error.message}`);
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "🚀 Trigger Release";
+        }
+      });
+
+      function showResult(type, message) {
+        if (type && message) {
+          result.className = `result ${type}`;
+          result.innerHTML = message;
+          result.style.display = "block";
+        } else {
+          result.style.display = "none";
+        }
+      }
+
+      function getRepoPath() {
+        // This would be configured based on your actual repository
+        return "your-username/your-repo";
+      }
+
+      // Load releases
+      async function loadReleases() {
+        releasesList.innerHTML =
+          '<p style="text-align: center; color: #666; padding: 20px;">Loading releases...</p>';
+
+        try {
+          const response = await fetch("/releases");
+          const releases = await response.json();
+
+          if (releases.length === 0) {
+            releasesList.innerHTML =
+              '<p style="text-align: center; color: #666; padding: 20px;">No releases found</p>';
+            return;
+          }
+
+          releasesList.innerHTML = "";
+
+          releases.forEach((release) => {
+            const div = document.createElement("div");
+            div.className = "release-item";
+
+            const publishedDate = new Date(
+              release.published_at
+            ).toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+
+            div.innerHTML = `
+                        <div class="release-version">${release.version}</div>
+                        <div class="release-date">Published: ${publishedDate}</div>
+                        <div class="release-stats">
+                            <span>📦 ${release.assets_count} files</span>
+                            <span>📥 ${release.total_downloads} downloads</span>
+                            <a href="${release.html_url}" target="_blank" class="release-link">View Release →</a>
+                        </div>
+                    `;
+
+            releasesList.appendChild(div);
+          });
+        } catch (error) {
+          releasesList.innerHTML = `
+                    <p style="text-align: center; color: #dc3545; padding: 20px;">
+                        Failed to load releases: ${error.message}
+                    </p>
+                `;
+        }
+      }
+
+      // Auto-generate version number
+      document.addEventListener("DOMContentLoaded", () => {
+        const versionInput = document.getElementById("version");
+        if (!versionInput.value) {
+          const now = new Date();
+          const version = `v${now.getFullYear()}.${(now.getMonth() + 1)
+            .toString()
+            .padStart(2, "0")}.${now
+            .getDate()
+            .toString()
+            .padStart(2, "0")}-${now
+            .getHours()
+            .toString()
+            .padStart(2, "0")}${now.getMinutes().toString().padStart(2, "0")}`;
+          versionInput.value = version;
+        }
+      });
+    </script>
+  </body>
+</html>
