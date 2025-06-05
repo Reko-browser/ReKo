@@ -1,0 +1,246 @@
+name: Build and Release
+
+on:
+  # Trigger via webhook (repository_dispatch)
+  repository_dispatch:
+    types: [build-release]
+
+  # Also allow manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., v1.0.0)"
+        required: true
+        default: "v1.0.0"
+      files_url:
+        description: "URL to download files from (optional)"
+        required: false
+      release_notes:
+        description: "Release notes"
+        required: false
+        default: "Automated release"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up variables
+        id: vars
+        run: |
+          # Get version from webhook payload or manual input
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            VERSION="${{ github.event.client_payload.version }}"
+            FILES_URL="${{ github.event.client_payload.files_url }}"
+            RELEASE_NOTES="${{ github.event.client_payload.release_notes }}"
+            PLATFORM="${{ github.event.client_payload.platform }}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+            FILES_URL="${{ github.event.inputs.files_url }}"
+            RELEASE_NOTES="${{ github.event.inputs.release_notes }}"
+            PLATFORM="manual"
+          fi
+
+          # Set defaults if not provided
+          VERSION=${VERSION:-"v$(date +%Y%m%d-%H%M%S)"}
+          RELEASE_NOTES=${RELEASE_NOTES:-"Automated release"}
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "files_url=$FILES_URL" >> $GITHUB_OUTPUT
+          echo "release_notes=$RELEASE_NOTES" >> $GITHUB_OUTPUT
+          echo "platform=$PLATFORM" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date -u +%Y-%m-%d_%H-%M-%S)" >> $GITHUB_OUTPUT
+
+      - name: Create build directory
+        run: |
+          mkdir -p /packages/browser/build/files
+          mkdir -p /packages/browser/dist
+
+      - name: Download files from URL (if provided)
+        if: steps.vars.outputs.files_url != ''
+        run: |
+          echo "Downloading files from: ${{ steps.vars.outputs.files_url }}"
+          # Handle different URL types
+          if [[ "${{ steps.vars.outputs.files_url }}" == *".zip" ]]; then
+            # Download and extract zip
+            curl -L -o temp.zip "${{ steps.vars.outputs.files_url }}"
+            unzip temp.zip -d /packages/browser/build/files/
+            rm temp.zip
+          elif [[ "${{ steps.vars.outputs.files_url }}" == *".tar.gz" ]]; then
+            # Download and extract tar.gz
+            curl -L "${{ steps.vars.outputs.files_url }}" | tar -xz -C /packages/browser/build/files/
+          else
+            # Download single file
+            filename=$(basename "${{ steps.vars.outputs.files_url }}")
+            curl -L -o "/packages/browser/build/files/$filename" "${{ steps.vars.outputs.files_url }}"
+          fi
+
+      - name: Copy local files (if no URL provided)
+        if: steps.vars.outputs.files_url == ''
+        run: |
+          # Copy files from a specific directory in your repo
+          # Adjust these paths based on your repository structure
+          if [ -d "binaries" ]; then
+            cp -r binaries/* /packages/browser/build/files/
+          fi
+          if [ -d "installers" ]; then
+            cp -r installers/* /packages/browser/build/files/
+          fi
+          if [ -d "release-files" ]; then
+            cp -r release-files/* /packages/browser/build/files/
+          fi
+
+          # Or copy specific files
+          # cp my-binary /packages/browser/build/files/
+          # cp installer.exe /packages/browser/build/files/
+
+      - name: List files to be packaged
+        run: |
+          echo "Files to be packaged:"
+          find build/files -type f -exec ls -lh {} \;
+
+      - name: Create platform-specific packages
+        run: |
+          cd /packages/browser/build/files
+
+          # Create different packages based on platform or file types
+          if [ "${{ steps.vars.outputs.platform }}" = "windows" ] || ls *.exe >/dev/null 2>&1; then
+            echo "Creating Windows package..."
+            zip -r "../../dist/browser-windows-${{ steps.vars.outputs.version }}.zip" *.exe *.dll *.msi 2>/dev/null || true
+          fi
+
+          if [ "${{ steps.vars.outputs.platform }}" = "macos" ] || ls *.dmg >/dev/null 2>&1 || ls *.app >/dev/null 2>&1; then
+            echo "Creating macOS package..."
+            zip -r "../../dist/browser-macos-${{ steps.vars.outputs.version }}.zip" *.dmg *.app 2>/dev/null || true
+          fi
+
+          if [ "${{ steps.vars.outputs.platform }}" = "linux" ] || ls *.deb >/dev/null 2>&1 || ls *.rpm >/dev/null 2>&1 || ls *.AppImage >/dev/null 2>&1; then
+            echo "Creating Linux package..."
+            zip -r "../../dist/browser-linux-${{ steps.vars.outputs.version }}.zip" *.deb *.rpm *.AppImage *.tar.gz 2>/dev/null || true
+          fi
+
+          # Create a universal package with all files
+          echo "Creating universal package..."
+          zip -r "../../dist/browser-universal-${{ steps.vars.outputs.version }}.zip" .
+
+          cd ../..
+
+      - name: Verify packages
+        run: |
+          echo "Created packages:"
+          ls -lh /packages/browser/dist/
+
+          # Ensure we have at least one package
+          if [ ! "$(ls -A dist/)" ]; then
+            echo "No packages created! Creating emergency package..."
+            cd /packages/browser/build/files
+            zip -r "../../dist/browser-emergency-${{ steps.vars.outputs.version }}.zip" . || echo "No files found to package"
+            cd ../..
+          fi
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release_notes.md << EOF
+          # Release ${{ steps.vars.outputs.version }}
+
+          ${{ steps.vars.outputs.release_notes }}
+
+          ## Build Information
+          - **Build Date**: ${{ steps.vars.outputs.timestamp }}
+          - **Platform**: ${{ steps.vars.outputs.platform }}
+          - **Triggered by**: ${{ github.event_name }}
+
+          ## Files Included
+          $(cd build/files && find . -type f | sed 's/^/- /')
+
+          ## Download
+          Choose the appropriate package for your platform:
+          EOF
+
+          if [ -f "/packages/browser/dist/browser-windows-${{ steps.vars.outputs.version }}.zip" ]; then
+            echo "- **Windows**: browser-windows-${{ steps.vars.outputs.version }}.zip" >> release_notes.md
+          fi
+          if [ -f "/packages/browser/dist/browser-macos-${{ steps.vars.outputs.version }}.zip" ]; then
+            echo "- **macOS**: browser-macos-${{ steps.vars.outputs.version }}.zip" >> release_notes.md
+          fi
+          if [ -f "/packages/browser/dist/browser-linux-${{ steps.vars.outputs.version }}.zip" ]; then
+            echo "- **Linux**: browser-linux-${{ steps.vars.outputs.version }}.zip" >> release_notes.md
+          fi
+          echo "- **Universal**: browser-universal-${{ steps.vars.outputs.version }}.zip" >> release_notes.md
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.vars.outputs.version }}
+          release_name: Release ${{ steps.vars.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+
+      - name: Upload Release Assets
+        run: |
+          for file in /packages/browser/dist/*.zip; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              echo "Uploading $filename..."
+              curl \
+                -X POST \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Content-Type: application/zip" \
+                --data-binary @"$file" \
+                "${{ steps.create_release.outputs.upload_url }}?name=$filename"
+            fi
+          done
+
+      - name: Trigger Render Deploy
+        if: env.RENDER_DEPLOY_HOOK_URL != ''
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          echo "Triggering Render deployment..."
+          curl -X POST "$RENDER_DEPLOY_HOOK_URL"
+          echo "Render deployment triggered successfully"
+
+      - name: Create deployment status file
+        run: |
+          cat > deployment-status.json << EOF
+          {
+            "status": "success",
+            "version": "${{ steps.vars.outputs.version }}",
+            "release_url": "${{ steps.create_release.outputs.html_url }}",
+            "timestamp": "${{ steps.vars.outputs.timestamp }}",
+            "files": [
+              $(cd dist && ls *.zip | sed 's/.*/"&"/' | paste -sd,)
+            ]
+          }
+          EOF
+
+      - name: Notify webhook (if provided)
+        if: github.event.client_payload.callback_url != ''
+        run: |
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d @deployment-status.json \
+            "${{ github.event.client_payload.callback_url }}"
+
+      - name: Summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.vars.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release URL**: ${{ steps.create_release.outputs.html_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Files**: $(ls dist/*.zip | wc -l) packages created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Packages Created:" >> $GITHUB_STEP_SUMMARY
+          for file in dist/*.zip; do
+            if [ -f "$file" ]; then
+              size=$(ls -lh "$file" | awk '{print $5}')
+              echo "- $(basename "$file") ($size)" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
