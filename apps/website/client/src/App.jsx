@@ -7,7 +7,7 @@ import {
 import "./App.css";
 import Header from "./components/Header.jsx";
 import Admin from "./components/Admin.jsx";
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 
 function AppContent() {
   const [searchParams] = useSearchParams();
